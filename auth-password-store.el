@@ -5,7 +5,7 @@
 ;; Author: Damien Cassou <damien@cassou.me>,
 ;;         Nicolas Petton <nicolas@petton.fr>
 ;; Version: 0.1
-;; GIT: https://github.com/DamienCassou/auth-password-store
+;; GIT: https://github.com/kklimonda/auth-password-store
 ;; Package-Requires: ((emacs "24.4") (password-store "0.1") (seq "1.9") (cl-lib "0.5"))
 ;; Created: 07 Jun 2015
 ;; Keywords: pass password-store auth-source username password login
@@ -47,11 +47,12 @@ See `auth-source-search' for details on SPEC."
   (when (listp host)
     ;; Take the first non-nil item of the list of hosts
     (setq host (seq-find #'identity host)))
-  (let ((entry (auth-pass--find-match host user)))
+  (let* ((ports (if (listp port) port (list port)))
+	 (entry (auth-pass--find-match host ports user)))
     (when entry
       (list (list
              :host host
-             :port (or port (auth-pass-get "port" entry))
+             :port (auth-pass-get "port" entry)
              :user (auth-pass-get "user" entry)
              :secret (lambda () (auth-pass-get 'secret entry)))))))
 
@@ -122,24 +123,41 @@ CONTENTS is the contents of a password-store formatted file."
                                     (mapconcat #'identity (cdr pair) ":")))))
                         (cdr lines)))))
 
+(defun auth-pass--field-match-p (entry field value)
+  (or (null value)
+      (string= value (auth-pass-get field entry))))
+
 (defun auth-pass--user-match-p (entry user)
-  "Return true iff ENTRY match USER."
-  (or (null user)
-      (string= user (auth-pass-get "user" entry))))
+  "Return true if `ENTRY' matches `USER'."
+  (auth-pass--field-match-p entry "user" user))
+
+(defun auth-pass--port-match-p (entry port)
+  "Return true if `PORT' defined in `ENTRY' matches."
+  (auth-pass--field-match-p entry "port" (number-to-string port)))
 
 (defun auth-pass--hostname (host)
   "Extract hostname from HOST."
   (let ((url (url-generic-parse-url host)))
     (or (url-host url) host)))
 
-(defun auth-pass--find-match (host user)
+(defun auth-pass--entry-port-member-p (entry ports)
+  "Returns `TRUE' if ports is either `nil', or port from entry is a member."
+  (if ports
+      (let ((port (auth-pass-get "port" entry)))
+	(when port
+	  (member (string-to-int port) ports)))
+    t))
+
+(defun auth-pass--find-match (host ports user)
   "Return a password-store entry name matching HOST and USER.
 If many matches are found, return the first one.  If no match is
 found, return nil."
   (or
    (let ((hostname (auth-pass--hostname host)))
      (auth-source-do-debug "auth-password-store: searching for '%s' in entry names" host)
-     (seq-find (lambda (entry) (auth-pass--user-match-p entry user))
+     (seq-find (lambda (entry) (and
+				(auth-pass--user-match-p entry user)
+				(auth-pass--entry-port-member-p entry ports)))
                (seq-filter (lambda (entry)
                              (string-match hostname entry))
                            (password-store-list))))
@@ -148,7 +166,8 @@ found, return nil."
      (seq-find (lambda (entry)
                  (and
                   (string= host (auth-pass-get "url" entry))
-                  (auth-pass--user-match-p entry user)))
+                  (auth-pass--user-match-p entry user)
+		  (auth-pass--entry-port-member-pentry ports)))
                (password-store-list)))))
 
 (provide 'auth-password-store)
